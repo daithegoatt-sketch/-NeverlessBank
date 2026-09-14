@@ -23,6 +23,8 @@ function newUser() {
     stocks: {},
     assets: {},
     stockBasis: {},
+    loanDebt: 0,
+    city: [],
     salaryAt: 0,
     tipAt: 0,
     loanAt: 0,
@@ -44,6 +46,8 @@ function packUser(s) {
     st: s.stocks || {},
     as: s.assets || {},
     sb: s.stockBasis || {},
+    ld: Math.max(0, Math.floor(Number(s.loanDebt) || 0)),
+    cy: Array.isArray(s.city) ? s.city.slice(0, 60) : [],
     sa: s.salaryAt,
     ta: s.tipAt,
     la: s.loanAt || 0,
@@ -81,6 +85,8 @@ function unpackUser(x = {}) {
     stocks,
     assets,
     stockBasis,
+    loanDebt: Math.max(0, Math.floor(Number(x.ld ?? 0) || 0)),
+    city: Array.isArray(x.cy) ? x.cy.filter((code) => /^[A-Z0-9_]+$/.test(String(code))).slice(0,60) : [],
     salaryAt: Math.max(0, Number(x.sa ?? 0) || 0),
     tipAt: Math.max(0, Number(x.ta ?? 0) || 0),
     loanAt: Math.max(0, Number(x.la ?? 0) || 0),
@@ -102,7 +108,7 @@ function unpackUser(x = {}) {
 
 function newMarket() {
   const now = Date.now();
-  return { price: 100, history: [100], updatedAt: now, assetUpdatedAt: now, goldUpdatedAt: now };
+  return { price: 100, history: [100], updatedAt: now, assetUpdatedAt: now, goldUpdatedAt: now, stockScaleVersion: 1 };
 }
 
 function packMarket(m) {
@@ -124,7 +130,7 @@ function packMarket(m) {
       };
     }
   }
-  return { p: m.price, h: Array.isArray(m.history) ? m.history.slice(-24) : [], u: m.updatedAt, au: m.assetUpdatedAt || m.updatedAt, gu: m.goldUpdatedAt || m.assetUpdatedAt || m.updatedAt, c: companies, a: assets };
+  return { p: m.price, h: Array.isArray(m.history) ? m.history.slice(-24) : [], u: m.updatedAt, au: m.assetUpdatedAt || m.updatedAt, gu: m.goldUpdatedAt || m.assetUpdatedAt || m.updatedAt, sv: Number(m.stockScaleVersion || 1), c: companies, a: assets };
 }
 
 function unpackMarket(x = {}) {
@@ -157,7 +163,7 @@ function unpackMarket(x = {}) {
   const updatedAt = Math.max(0, Number(x.u) || Date.now());
   const assetUpdatedAt = Math.max(0, Number(x.au) || updatedAt);
   const goldUpdatedAt = Math.max(0, Number(x.gu) || assetUpdatedAt);
-  return { price, history, companies, assets, updatedAt, assetUpdatedAt, goldUpdatedAt };
+  return { price, history, companies, assets, updatedAt, assetUpdatedAt, goldUpdatedAt, stockScaleVersion: Math.max(1, Number(x.sv) || 1) };
 }
 
 function enc(value) {
