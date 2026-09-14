@@ -333,7 +333,9 @@ function baseNetWorth(state, market) {
 }
 
 function updateMarket(guildId) {
-  const market = normalizeMarketShape(markets.get(guildId) || newMarket());
+  const currentMarket = markets.get(guildId) || newMarket();
+  const scaleChanged = Number(currentMarket.stockScaleVersion || 1) < 2;
+  const market = normalizeMarketShape(currentMarket);
   const now = Date.now();
   const stockSteps = Math.min(24, Math.floor(Math.max(0, now - market.updatedAt) / MARKET_STEP));
   const assetSteps = Math.min(24, Math.floor(Math.max(0, now - market.assetUpdatedAt) / ASSET_MARKET_STEP));
@@ -374,7 +376,7 @@ function updateMarket(guildId) {
   markets.set(guildId, market);
   return {
     market,
-    changed: stockSteps > 0 || assetSteps > 0 || goldSteps > 0,
+    changed: scaleChanged || stockSteps > 0 || assetSteps > 0 || goldSteps > 0,
     stockChanged: stockSteps > 0,
     assetChanged: assetSteps > 0,
     goldChanged: goldSteps > 0,
