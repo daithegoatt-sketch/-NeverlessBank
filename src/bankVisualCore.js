@@ -95,7 +95,8 @@ async function balanceCard(user, state, price) {
   metric(ctx, 360, 380, 315, 92, 'إجمالي الأرباح', money(state.earned), THEME.green);
   metric(ctx, 710, 380, 315, 92, 'إجمالي الخسائر', money(state.lost), THEME.red);
 
-  rtlText(ctx, `سعر NVRS الحالي: ${money(price)}`, 1025, 530, '600 14px "Noto Sans Arabic", "Neverless Latin"', THEME.muted);
+  const debt = Math.max(0, Number(state.loanDebt || 0)) + Math.max(0, -Number(state.balance || 0));
+  rtlText(ctx, debt > 0 ? `القرض المتبقي: ${money(debt)}   -   سعر NVRS: ${money(price)}` : `سعر NVRS الحالي: ${money(price)}`, 1025, 530, '600 14px "Noto Sans Arabic", "Neverless Latin"', debt > 0 ? THEME.red : THEME.muted);
   return canvas.toBuffer('image/png');
 }
 
