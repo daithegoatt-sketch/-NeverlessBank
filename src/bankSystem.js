@@ -46,7 +46,6 @@ const {
   propertiesCard,
   assetCatalogCard,
   goldMarketCard,
-  cityCard,
   assetTradeCard,
 } = require('./bankVisualCore');
 const {
@@ -537,13 +536,6 @@ async function tradeAsset(message, action, raw) {
         if (owned < count) return replyInfo(message,'لا تملك هذا الممتلك',`لديك ${owned} من ${asset.name}`);
         state.assets[asset.code] = owned - count;
         if (state.assets[asset.code] <= 0) delete state.assets[asset.code];
-        const keep = Math.max(0, Math.floor(Number(state.assets?.[asset.code] || 0)));
-        let seen = 0;
-        state.city = (Array.isArray(state.city) ? state.city : []).filter((code) => {
-          if (code !== asset.code) return true;
-          seen += 1;
-          return seen <= keep;
-        });
         state.balance += total;
       }
     }
@@ -562,7 +554,7 @@ function helpEmbed() {
       { name: 'الدخل', value: 'راتب\nبخشيش\nقرض\nتسديد قرض\nوقت', inline: true },
       { name: 'الألعاب', value: 'رهان\nاستثمار\nنرد\nقمار\nتداول', inline: true },
       { name: 'ألعاب إضافية', value: 'روليت\nهايلو\nصناديق\nالغام\nفواكه\nالوان\nعملة\nرقم', inline: true },
-      { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات\nمدينتي', inline: true },
+      { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات', inline: true },
       { name: 'الأمان والترتيب', value: 'سرقة\nحماية\nالغاء حماية\nتوب', inline: true },
     )
     .setFooter({ text: 'Neverless Bank' });
@@ -1674,71 +1666,6 @@ async function rob(message) {
   });
 }
 
-function cityButtons(state) {
-  const placedCounts = {};
-  for (const code of state.city || []) placedCounts[code] = (placedCounts[code] || 0) + 1;
-  const candidates = Object.values(ASSET_CATALOG)
-    .filter((asset) => asset.category !== 'GOLD')
-    .filter((asset) => Math.floor(Number(state.assets?.[asset.code] || 0)) > (placedCounts[asset.code] || 0))
-    .slice(0, 20);
-  const rows = [];
-  for (let i = 0; i < candidates.length; i += 5) {
-    const row = new ActionRowBuilder();
-    for (const asset of candidates.slice(i, i + 5)) {
-      row.addComponents(new ButtonBuilder()
-        .setCustomId(`nlbank:cityadd:${asset.code}`)
-        .setLabel(`ضيف ${asset.name}`)
-        .setStyle(ButtonStyle.Secondary));
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-async function city(message) {
-  const state = getUser(message.guildId, message.author.id);
-  const sent = await replyImage(
-    message,
-    cityCard(message.author, state, ASSET_CATALOG),
-    `city-${message.author.id}.png`,
-    `<@${message.author.id}> — مدينتي`,
-    cityButtons(state),
-  );
-  if (!sent?.createMessageComponentCollector) return;
-
-  const collector = sent.createMessageComponentCollector({ time: 120000 });
-  collector.on('collect', async (interaction) => {
-    if (interaction.user.id !== message.author.id) {
-      return interaction.reply({ content: 'هذه المدينة ليست لك.', ephemeral: true }).catch(() => {});
-    }
-    const [, action, code] = interaction.customId.split(':');
-    if (action !== 'cityadd' || !ASSET_CATALOG[code]) return interaction.deferUpdate().catch(()=>{});
-    await interaction.deferUpdate().catch(()=>{});
-
-    await withLock(accountLockKey(message.guildId, message.author.id), async () => {
-      const fresh = getUser(message.guildId, message.author.id);
-      const owned = Math.floor(Number(fresh.assets?.[code] || 0));
-      const placed = (fresh.city || []).filter((item) => item === code).length;
-      if (placed >= owned) return;
-      if (!Array.isArray(fresh.city)) fresh.city = [];
-      fresh.city.push(code);
-      await persistUser(message.guild, message.author.id);
-      await sent.edit({
-        files: [{ attachment: cityCard(message.author, fresh, ASSET_CATALOG), name: `city-${message.author.id}.png` }],
-        attachments: [],
-        components: cityButtons(fresh),
-      }).catch(()=>{});
-    });
-  });
-  collector.on('end', async () => {
-    const disabled = cityButtons(getUser(message.guildId, message.author.id)).map((row) => {
-      row.components.forEach((button) => button.setDisabled(true));
-      return row;
-    });
-    await sent.edit({ components: disabled }).catch(()=>{});
-  });
-}
-
 function isAdmin(message) { return Boolean(message.member?.permissions?.has?.(ADMIN_PERMISSION)); }
 
 async function adminMoney(message, action, raw) {
@@ -1772,7 +1699,7 @@ async function handleBankMessage(message, client) {
   const text = normalized(message.content);
   if (!text) return false;
 
-  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|تسديد قرض|سداد قرض|مدينتي|city|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
+  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|تسديد قرض|سداد قرض|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
   if (!known) return false;
 
   try {
