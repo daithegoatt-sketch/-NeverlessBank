@@ -46,6 +46,7 @@ const {
   propertiesCard,
   assetCatalogCard,
   goldMarketCard,
+  cityCard,
   assetTradeCard,
 } = require('./bankVisualCore');
 const {
@@ -181,6 +182,23 @@ function getUser(guildId, userId) {
   return users.get(accountKey);
 }
 
+function debitBalance(state, amount) {
+  const value = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!value) return 0;
+  const before = Number(state.balance) || 0;
+  state.balance = before - value;
+  if (Number(state.loanDebt || 0) > 0 && before > 0 && state.balance <= 0) {
+    state.balance -= Math.max(0, Math.floor(Number(state.loanDebt) || 0));
+    state.loanDebt = 0;
+  }
+  return value;
+}
+
+function outstandingLoan(state) {
+  return Math.max(0, Math.floor(Number(state.loanDebt) || 0)) + Math.max(0, -Math.floor(Number(state.balance) || 0));
+}
+
+
 async function persistUser(guild, userId) {
   const channel = dataChannel(guild);
   if (!channel) return false;
@@ -271,6 +289,14 @@ function normalizeMarketShape(market) {
   for (const asset of Object.values(ASSET_CATALOG)) {
     if (!market.assets[asset.code]) market.assets[asset.code] = { price: asset.seed, history: [asset.seed] };
   }
+  if (Number(market.stockScaleVersion || 1) < 2) {
+    for (const company of Object.values(STOCK_COMPANIES)) {
+      const data = market.companies[company.code];
+      data.price = Math.max(10, Math.round(Number(data.price || 1) * 10));
+      data.history = (Array.isArray(data.history) ? data.history : [data.price]).map((n) => Math.max(10, Math.round(Number(n || 1) * 10))).slice(-24);
+    }
+    market.stockScaleVersion = 2;
+  }
   market.updatedAt = Math.max(0, Number(market.updatedAt) || Date.now());
   market.assetUpdatedAt = Math.max(0, Number(market.assetUpdatedAt) || market.updatedAt || Date.now());
   market.goldUpdatedAt = Math.max(0, Number(market.goldUpdatedAt) || market.assetUpdatedAt || Date.now());
@@ -282,11 +308,20 @@ function normalizeMarketShape(market) {
 function marketMove() {
   const roll = Math.random();
   let magnitude;
-  if (roll < 0.35) magnitude = 0.02 + Math.random() * 0.05;
-  else if (roll < 0.70) magnitude = 0.08 + Math.random() * 0.11;
-  else if (roll < 0.92) magnitude = 0.20 + Math.random() * 0.16;
-  else magnitude = 0.40 + Math.random() * 0.30;
+  if (roll < 0.25) magnitude = 0.04 + Math.random() * 0.06;
+  else if (roll < 0.65) magnitude = 0.12 + Math.random() * 0.13;
+  else if (roll < 0.90) magnitude = 0.30 + Math.random() * 0.25;
+  else magnitude = 0.60 + Math.random() * 0.20;
   return magnitude * (Math.random() < 0.5 ? -1 : 1);
+}
+
+function goldMove() {
+  const roll = Math.random();
+  let magnitude;
+  if (roll < 0.60) magnitude = 0.015 + Math.random() * 0.035;
+  else if (roll < 0.90) magnitude = 0.06 + Math.random() * 0.06;
+  else magnitude = 0.15 + Math.random() * 0.10;
+  return magnitude * (Math.random() < 0.58 ? 1 : -1);
 }
 
 function assetsValue(state, market) {
@@ -328,8 +363,7 @@ function updateMarket(guildId) {
   for (let i = 0; i < goldSteps; i += 1) {
     const asset = ASSET_CATALOG.GOLD;
     const data = market.assets.GOLD;
-    const move = (Math.random() < 0.95 ? 0.0015 + Math.random() * 0.0065 : 0.008 + Math.random() * 0.012)
-      * (Math.random() < 0.5 ? -1 : 1);
+    const move = goldMove();
     data.price = clamp(Math.max(1, Math.round(data.price * (1 + move))), Math.max(1, Math.round(asset.seed * 0.08)), asset.seed * 20);
     data.history = [...(data.history || [data.price]), data.price].slice(-24);
     market.goldUpdatedAt += GOLD_MARKET_STEP;
@@ -485,7 +519,7 @@ async function tradeAsset(message, action, raw) {
         `${action === 'buy' ? 'شراء' : 'بيع'} ذهب كامل`,
       ]);
       quantity = total / price;
-      if (action === 'buy') { state.balance -= total; state.assets.GOLD = owned + quantity; }
+      if (action === 'buy') { debitBalance(state, total); state.assets.GOLD = owned + quantity; }
       else { state.assets.GOLD = Math.max(0, owned - quantity); state.balance += total; }
     } else {
       let count = 1;
@@ -495,7 +529,7 @@ async function tradeAsset(message, action, raw) {
       total = price * count;
       if (action === 'buy') {
         if (state.balance < total) return replyInfo(message,'رصيد غير كافٍ',`تحتاج ${money(total)}`);
-        state.balance -= total;
+        debitBalance(state, total);
         state.assets[asset.code] = owned + count;
       } else {
         if (owned < count) return replyInfo(message,'لا تملك هذا الممتلك',`لديك ${owned} من ${asset.name}`);
@@ -519,7 +553,7 @@ function helpEmbed() {
       { name: 'الدخل', value: 'راتب\nبخشيش\nقرض\nوقت', inline: true },
       { name: 'الألعاب', value: 'رهان\nاستثمار\nنرد\nقمار\nتداول', inline: true },
       { name: 'ألعاب إضافية', value: 'روليت\nهايلو\nصناديق\nالغام\nفواكه\nالوان\nعملة\nرقم', inline: true },
-      { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات', inline: true },
+      { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات\nمدينتي', inline: true },
       { name: 'الأمان والترتيب', value: 'سرقة\nحماية\nالغاء حماية\nتوب', inline: true },
     )
     .setFooter({ text: 'Neverless Bank' });
@@ -631,20 +665,55 @@ async function income(message, type) {
 async function loan(message) {
   await withLock(accountLockKey(message.guildId, message.author.id), async () => {
     const state = getUser(message.guildId, message.author.id);
+    if (outstandingLoan(state) > 0) {
+      await replyInfo(message, 'لديك قرض قائم', `المتبقي عليك ${money(outstandingLoan(state))}`);
+      return;
+    }
     const left = Math.max(0, Number(state.loanAt || 0) + LOAN_CD - Date.now());
     if (left > 0) {
       await replyInfo(message, 'القرض غير متاح', `الوقت الباقي ${formatDuration(left)}`);
       return;
     }
     state.balance += LOAN_AMOUNT;
-    state.earned += LOAN_AMOUNT;
+    state.loanDebt = LOAN_AMOUNT;
     state.loanAt = Date.now();
     await commitCard(
       message,
       persistUser(message.guild, message.author.id),
       rewardCard(message.author, 'قرض Neverless', LOAN_AMOUNT, state.balance, 'loan'),
       `loan-${message.author.id}.png`,
-      `<@${message.author.id}> — تم إيداع قرض ${money(LOAN_AMOUNT)}`,
+      `<@${message.author.id}> — تم إيداع قرض ${money(LOAN_AMOUNT)} • المتبقي ${money(state.loanDebt)}`,
+    );
+  });
+}
+
+async function repayLoan(message, raw = 'كامل') {
+  await withLock(accountLockKey(message.guildId, message.author.id), async () => {
+    const state = getUser(message.guildId, message.author.id);
+    const debt = outstandingLoan(state);
+    if (debt <= 0) return replyInfo(message, 'لا يوجد قرض', 'ليس لديك قرض متبقٍ للسداد');
+
+    if (state.balance < 0) {
+      return replyInfo(message, 'رصيدك بالسالب', `المتبقي عليك ${money(Math.abs(state.balance))} • أي راتب أو بخشيش يقلل الدين تلقائياً`);
+    }
+
+    const available = Math.min(Math.max(0, state.balance), Math.max(0, Number(state.loanDebt || 0)));
+    const amount = parseAmount(raw || 'كامل', available);
+    if (!Number.isFinite(amount)) return replyUsage(message, 'تسديد قرض', ['تسديد قرض كامل', 'تسديد قرض نص', 'تسديد قرض 5000']);
+
+    state.balance -= amount;
+    state.loanDebt = Math.max(0, Number(state.loanDebt || 0) - amount);
+    if (state.balance <= 0 && state.loanDebt > 0) {
+      state.balance = -Math.floor(state.loanDebt);
+      state.loanDebt = 0;
+    }
+
+    await commitCard(
+      message,
+      persistUser(message.guild, message.author.id),
+      economyEventCard(message.author, 'تسديد قرض', amount, state.balance, 'good'),
+      `loan-repay-${message.author.id}.png`,
+      `<@${message.author.id}> — تم تسديد ${money(amount)} • المتبقي ${money(outstandingLoan(state))}`,
     );
   });
 }
@@ -668,7 +737,7 @@ async function transfer(message, raw) {
     }
 
     const toState = getUser(message.guildId, target.id);
-    fromState.balance -= amount;
+    debitBalance(fromState, amount);
     toState.balance += amount;
 
     const persistPromise = Promise.all([
@@ -696,7 +765,7 @@ async function vault(message, action, raw) {
     }
 
     if (action === 'deposit') {
-      state.balance -= amount;
+      debitBalance(state, amount);
       state.vault += amount;
     } else {
       state.vault -= amount;
@@ -764,7 +833,8 @@ async function moneyGame(message, type, raw) {
 
     const out = randomOutcome(type, wager);
     const net = out.payout - wager;
-    state.balance = state.balance - wager + out.payout;
+    debitBalance(state, wager);
+    state.balance += out.payout;
     state.games += 1;
     if (net > 0) {
       state.wins += 1;
@@ -951,7 +1021,7 @@ async function roulette(message, raw) {
     const multiplier = roll >= 0.95 ? 5 : roll >= 0.85 ? 2 : roll >= 0.65 ? 1.5 : roll >= 0.45 ? 1 : 0;
     const payout = Math.floor(wager * multiplier);
     const net = payout - wager;
-    state.balance = state.balance - wager + payout;
+    debitBalance(state, wager); state.balance += payout;
     state.games += 1;
     if (net > 0) {
       state.wins += 1;
@@ -1050,7 +1120,7 @@ async function hilo(message, raw) {
       const won = up ? next > current : next < current;
       const payout = won ? wager * 2 : 0;
       const net = payout - wager;
-      fresh.balance = fresh.balance - wager + payout;
+      debitBalance(fresh, wager); fresh.balance += payout;
       fresh.games += 1;
       if (net > 0) {
         fresh.wins += 1;
@@ -1158,7 +1228,7 @@ async function boxes(message, raw) {
       }
       const payout = picked.bomb ? 0 : Math.floor(wager * picked.mult);
       const net = payout - wager;
-      fresh.balance = fresh.balance - wager + payout;
+      debitBalance(fresh, wager); fresh.balance += payout;
       fresh.games += 1;
       if (net > 0) {
         fresh.wins += 1;
@@ -1252,7 +1322,7 @@ async function mines(message, raw) {
       await withLock(accountLockKey(message.guildId, message.author.id), async () => {
         const fresh = getUser(message.guildId, message.author.id);
         if (fresh.balance < wager) { result={error:'رصيدك أصبح أقل من مبلغ الجولة.'}; return; }
-        fresh.balance -= wager; fresh.games += 1; fresh.lost += wager;
+        debitBalance(fresh, wager); fresh.games += 1; fresh.lost += wager;
         result = await persistUser(message.guild,message.author.id) ? {balance:fresh.balance} : {error:'تعذر حفظ الجولة.'};
       });
       if (result.error) return sent.edit({content:result.error,components:gridButtons('mine',nonce,9,true,revealed)}).catch(()=>{});
@@ -1471,7 +1541,7 @@ async function tradeStockByValue(message, action, companyRaw, amountRaw) {
       const newOwned = owned + units;
       if (!state.stockBasis) state.stockBasis = {};
       state.stockBasis[company.code] = newOwned > 0 ? ((oldBasis * owned) + total) / newOwned : price;
-      state.balance -= total;
+      debitBalance(state, total);
       setHoldingUnits(state, company.code, newOwned);
     } else {
       const ownedValue = owned * price;
@@ -1586,12 +1656,77 @@ async function rob(message) {
     if (available < 1) { await persistUser(message.guild, message.author.id); return replyInfo(message, 'لا يوجد ما يسرق', 'رصيد العميل المتاح فارغ'); }
     const success = Math.random() < 0.52;
     const amount = Math.max(1, Math.min(available, Math.floor(available * (0.02 + Math.random() * 0.06))));
-    if (success) { victim.balance -= amount; thief.balance += amount; thief.earned += amount; }
-    else { const fine = Math.min(thief.balance, Math.max(1, Math.floor(amount * 0.35))); thief.balance -= fine; thief.lost += fine; }
+    if (success) { debitBalance(victim, amount); thief.balance += amount; thief.earned += amount; }
+    else { const fine = Math.min(thief.balance, Math.max(1, Math.floor(amount * 0.35))); debitBalance(thief, fine); thief.lost += fine; }
     const saved = Promise.all([persistUser(message.guild, message.author.id), persistUser(message.guild, target.id)]).then(x => x.every(Boolean));
     const shown = success ? amount : Math.min(thief.lost, Math.max(1, Math.floor(amount * .35)));
     await commitCard(message, saved, economyEventCard(message.author, success ? 'سرقة ناجحة' : 'فشلت السرقة', shown, thief.balance, success ? 'good' : 'bad'),
       `rob-${message.author.id}.png`, success ? `<@${message.author.id}> سرق ${money(amount)} من <@${target.id}>` : `<@${message.author.id}> فشلت السرقة وتم تغريمه`);
+  });
+}
+
+function cityButtons(state) {
+  const placedCounts = {};
+  for (const code of state.city || []) placedCounts[code] = (placedCounts[code] || 0) + 1;
+  const candidates = Object.values(ASSET_CATALOG)
+    .filter((asset) => asset.category !== 'GOLD')
+    .filter((asset) => Math.floor(Number(state.assets?.[asset.code] || 0)) > (placedCounts[asset.code] || 0))
+    .slice(0, 20);
+  const rows = [];
+  for (let i = 0; i < candidates.length; i += 5) {
+    const row = new ActionRowBuilder();
+    for (const asset of candidates.slice(i, i + 5)) {
+      row.addComponents(new ButtonBuilder()
+        .setCustomId(`nlbank:cityadd:${asset.code}`)
+        .setLabel(`ضيف ${asset.name}`)
+        .setStyle(ButtonStyle.Secondary));
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function city(message) {
+  const state = getUser(message.guildId, message.author.id);
+  const sent = await replyImage(
+    message,
+    cityCard(message.author, state, ASSET_CATALOG),
+    `city-${message.author.id}.png`,
+    `<@${message.author.id}> — مدينتي`,
+    cityButtons(state),
+  );
+  if (!sent?.createMessageComponentCollector) return;
+
+  const collector = sent.createMessageComponentCollector({ time: 120000 });
+  collector.on('collect', async (interaction) => {
+    if (interaction.user.id !== message.author.id) {
+      return interaction.reply({ content: 'هذه المدينة ليست لك.', ephemeral: true }).catch(() => {});
+    }
+    const [, action, code] = interaction.customId.split(':');
+    if (action !== 'cityadd' || !ASSET_CATALOG[code]) return interaction.deferUpdate().catch(()=>{});
+    await interaction.deferUpdate().catch(()=>{});
+
+    await withLock(accountLockKey(message.guildId, message.author.id), async () => {
+      const fresh = getUser(message.guildId, message.author.id);
+      const owned = Math.floor(Number(fresh.assets?.[code] || 0));
+      const placed = (fresh.city || []).filter((item) => item === code).length;
+      if (placed >= owned) return;
+      if (!Array.isArray(fresh.city)) fresh.city = [];
+      fresh.city.push(code);
+      await persistUser(message.guild, message.author.id);
+      await sent.edit({
+        files: [{ attachment: cityCard(message.author, fresh, ASSET_CATALOG), name: `city-${message.author.id}.png` }],
+        attachments: [],
+        components: cityButtons(fresh),
+      }).catch(()=>{});
+    });
+  });
+  collector.on('end', async () => {
+    const disabled = cityButtons(getUser(message.guildId, message.author.id)).map((row) => {
+      row.components.forEach((button) => button.setDisabled(true));
+      return row;
+    });
+    await sent.edit({ components: disabled }).catch(()=>{});
   });
 }
 
@@ -1628,7 +1763,7 @@ async function handleBankMessage(message, client) {
   const text = normalized(message.content);
   if (!text) return false;
 
-  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
+  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|تسديد قرض|سداد قرض|مدينتي|city|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
   if (!known) return false;
 
   try {
@@ -1664,6 +1799,15 @@ async function handleBankMessage(message, client) {
     }
     if (/^(?:قرض|loan)$/u.test(text)) {
       await loan(message);
+      return true;
+    }
+    let loanRepay = text.match(/^(?:تسديد قرض|سداد قرض)(?:\s+(.+))?$/u);
+    if (loanRepay) {
+      await repayLoan(message, loanRepay[1] || 'كامل');
+      return true;
+    }
+    if (/^(?:مدينتي|city)$/u.test(text)) {
+      await city(message);
       return true;
     }
     if (/^(?:حماية)$/u.test(text)) { await protect(message, false); return true; }
