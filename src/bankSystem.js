@@ -276,7 +276,7 @@ function normalizeMarketShape(market) {
   if (!market.companies || typeof market.companies !== 'object') market.companies = {};
   delete market.companies.VVIP;
   delete market.vvipLeaderId;
-  const seeds = { NVRS: 100, ASTRA: 240, ARCANE: 75, SALV: 155, VIRO: 42 };
+  const seeds = { NVRS: 1200, ASTRA: 2400, ARCANE: 900, SALV: 1650, VIRO: 650 };
   for (const company of Object.values(STOCK_COMPANIES)) {
     if (!market.companies[company.code]) {
       const seed = company.code === 'NVRS' && Number(market.price) > 0 ? Number(market.price) : seeds[company.code];
@@ -288,13 +288,17 @@ function normalizeMarketShape(market) {
   for (const asset of Object.values(ASSET_CATALOG)) {
     if (!market.assets[asset.code]) market.assets[asset.code] = { price: asset.seed, history: [asset.seed] };
   }
-  if (Number(market.stockScaleVersion || 1) < 2) {
+  if (Number(market.stockScaleVersion || 1) < 3) {
     for (const company of Object.values(STOCK_COMPANIES)) {
       const data = market.companies[company.code];
-      data.price = Math.max(10, Math.round(Number(data.price || 1) * 10));
-      data.history = (Array.isArray(data.history) ? data.history : [data.price]).map((n) => Math.max(10, Math.round(Number(n || 1) * 10))).slice(-24);
+      const current = Math.max(1, Number(data.price || seeds[company.code] || 100));
+      const multiplier = current < 100 ? 30 : current < 300 ? 10 : 3;
+      data.price = Math.max(300, Math.round(current * multiplier));
+      data.history = (Array.isArray(data.history) ? data.history : [current])
+        .map((n) => Math.max(300, Math.round(Math.max(1, Number(n || current)) * multiplier)))
+        .slice(-24);
     }
-    market.stockScaleVersion = 2;
+    market.stockScaleVersion = 3;
   }
   market.updatedAt = Math.max(0, Number(market.updatedAt) || Date.now());
   market.assetUpdatedAt = Math.max(0, Number(market.assetUpdatedAt) || market.updatedAt || Date.now());
@@ -333,7 +337,7 @@ function baseNetWorth(state, market) {
 
 function updateMarket(guildId) {
   const currentMarket = markets.get(guildId) || newMarket();
-  const scaleChanged = Number(currentMarket.stockScaleVersion || 1) < 2;
+  const scaleChanged = Number(currentMarket.stockScaleVersion || 1) < 3;
   const market = normalizeMarketShape(currentMarket);
   const now = Date.now();
   const stockSteps = Math.min(24, Math.floor(Math.max(0, now - market.updatedAt) / MARKET_STEP));
@@ -344,7 +348,7 @@ function updateMarket(guildId) {
     for (const company of Object.values(STOCK_COMPANIES)) {
       const data = market.companies[company.code];
       const move = marketMove();
-      data.price = clamp(Math.max(1, Math.round(data.price * (1 + move))), 2, 5000000);
+      data.price = clamp(Math.max(300, Math.round(data.price * (1 + move))), 300, 5000000);
       data.history = [...(data.history || [data.price]), data.price].slice(-24);
     }
     market.updatedAt += MARKET_STEP;
