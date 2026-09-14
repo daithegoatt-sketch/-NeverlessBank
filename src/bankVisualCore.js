@@ -95,7 +95,8 @@ async function balanceCard(user, state, price) {
   metric(ctx, 360, 380, 315, 92, 'إجمالي الأرباح', money(state.earned), THEME.green);
   metric(ctx, 710, 380, 315, 92, 'إجمالي الخسائر', money(state.lost), THEME.red);
 
-  rtlText(ctx, `سعر NVRS الحالي: ${money(price)}`, 1025, 530, '600 14px "Noto Sans Arabic", "Neverless Latin"', THEME.muted);
+  const debt = Math.max(0, Number(state.loanDebt || 0)) + Math.max(0, -Number(state.balance || 0));
+  rtlText(ctx, debt > 0 ? `القرض المتبقي: ${money(debt)}   -   سعر NVRS: ${money(price)}` : `سعر NVRS الحالي: ${money(price)}`, 1025, 530, '600 14px "Noto Sans Arabic", "Neverless Latin"', debt > 0 ? THEME.red : THEME.muted);
   return canvas.toBuffer('image/png');
 }
 
@@ -423,6 +424,91 @@ function goldMarketCard(market, state, nextUpdateMs) {
 }
 
 
+function cityCard(user, state, catalog) {
+  const { canvas, ctx } = baseCard('NEVERLESS CITY', 'مدينتي التجريبية', 1200, 820, THEME.green);
+
+  // grass
+  ctx.fillStyle = '#173a2b';
+  ctx.fillRect(45, 135, 1110, 625);
+
+  // roads
+  ctx.fillStyle = '#303842';
+  ctx.fillRect(45, 430, 1110, 145);
+  ctx.fillRect(510, 135, 170, 625);
+  ctx.fillStyle = '#d7b957';
+  for (let x = 70; x < 1140; x += 90) ctx.fillRect(x, 498, 52, 7);
+  for (let y = 155; y < 745; y += 78) ctx.fillRect(590, y, 8, 44);
+
+  // river/park edge
+  ctx.fillStyle = 'rgba(40,125,155,.55)';
+  fillRoundRect(ctx, 835, 160, 270, 180, 28, 'rgba(32,113,142,.60)', '#4aa6c7', 2);
+
+  // trees
+  const tree = (x,y,s=1) => {
+    ctx.fillStyle='#6f4a2e'; ctx.fillRect(x-5*s,y,10*s,26*s);
+    ctx.fillStyle='#2f8b54';
+    ctx.beginPath();ctx.arc(x,y-8*s,18*s,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x-12*s,y+3*s,14*s,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+12*s,y+3*s,14*s,0,Math.PI*2);ctx.fill();
+  };
+  [[90,205],[160,315],[260,205],[750,220],[790,320],[1080,390],[1020,690],[160,690],[430,680]].forEach(([x,y])=>tree(x,y,1));
+
+  const placed = Array.isArray(state.city) ? state.city : [];
+  const propSlots = [[120,375],[270,375],[370,255],[730,375],[885,375],[1010,375],[330,690],[760,690]];
+  const carSlots = [[105,520],[235,520],[365,520],[730,520],[860,520],[990,520]];
+  const planeSlots = [[880,645],[1020,645],[760,645]];
+
+  const counts = { PROPERTY:0, CAR:0, PLANE:0 };
+  const drawHouse = (x,y,kind) => {
+    const w=92,h=58;
+    ctx.fillStyle = kind==='PALACE' ? '#d7c7a1' : kind==='VILLA' ? '#d9d9d2' : kind==='APARTMENT' ? '#aeb9c5' : '#c9a47c';
+    ctx.fillRect(x-w/2,y-h,w,h);
+    ctx.fillStyle = kind==='APARTMENT' ? '#4f6478' : '#7a3f39';
+    ctx.beginPath();ctx.moveTo(x-w/2-7,y-h);ctx.lineTo(x,y-h-38);ctx.lineTo(x+w/2+7,y-h);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#365b78';
+    const windows = kind==='APARTMENT' ? 4 : 2;
+    for(let i=0;i<windows;i++) ctx.fillRect(x-w/2+12+(i%2)*38,y-h+14+Math.floor(i/2)*25,18,16);
+    ctx.fillStyle='#6f4a2e';ctx.fillRect(x-9,y-27,18,27);
+  };
+  const drawCar = (x,y,kind) => {
+    const length = kind==='SPORT' ? 95 : 82;
+    ctx.fillStyle = kind==='LUXURY' ? '#d1b567' : kind==='SPORT' ? '#b9474e' : kind==='SUV' ? '#65788d' : '#8ba6b8';
+    fillRoundRect(ctx,x-length/2,y-25,length,30,10,ctx.fillStyle);
+    ctx.fillStyle='#b8d5e8';fillRoundRect(ctx,x-24,y-40,48,22,8,ctx.fillStyle);
+    ctx.fillStyle='#111820';
+    ctx.beginPath();ctx.arc(x-length/3,y+5,10,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+length/3,y+5,10,0,Math.PI*2);ctx.fill();
+  };
+  const drawPlane = (x,y,kind) => {
+    ctx.save();ctx.translate(x,y);ctx.fillStyle=kind==='HELI'?'#8aa0b6':'#d7e2ea';
+    if(kind==='HELI'){
+      ctx.beginPath();ctx.ellipse(0,0,42,20,0,0,Math.PI*2);ctx.fill();
+      ctx.fillRect(25,-4,55,8);ctx.fillRect(-55,-32,110,5);ctx.fillRect(-3,-55,5,110);
+    } else {
+      ctx.beginPath();ctx.moveTo(-58,0);ctx.lineTo(56,-10);ctx.lineTo(56,10);ctx.closePath();ctx.fill();
+      ctx.fillRect(-5,-48,14,96);ctx.fillRect(30,-26,10,52);
+    }
+    ctx.restore();
+  };
+
+  for (const code of placed) {
+    const asset = catalog[code];
+    if (!asset || !counts.hasOwnProperty(asset.category)) continue;
+    if (asset.category === 'PROPERTY') {
+      const slot=propSlots[counts.PROPERTY++ % propSlots.length]; drawHouse(slot[0],slot[1],code);
+    } else if (asset.category === 'CAR') {
+      const slot=carSlots[counts.CAR++ % carSlots.length]; drawCar(slot[0],slot[1],code);
+    } else if (asset.category === 'PLANE') {
+      const slot=planeSlots[counts.PLANE++ % planeSlots.length]; drawPlane(slot[0],slot[1],code);
+    }
+  }
+
+  fillRoundRect(ctx, 55, 705, 1090, 48, 16, 'rgba(5,14,24,.82)', THEME.strokeSoft, 1.3);
+  const totalOwned = Object.entries(state.assets || {}).filter(([code]) => catalog[code] && catalog[code].category !== 'GOLD').reduce((sum,[,q])=>sum+Math.floor(Number(q)||0),0);
+  centerText(ctx, `العناصر الموضوعة ${placed.length} / الممتلكات القابلة للإضافة ${totalOwned}`, 600, 736, '800 17px "Noto Sans Arabic", "Neverless Latin"', THEME.text);
+  return canvas.toBuffer('image/png');
+}
+
 async function assetTradeCard(user, action, asset, quantity, total, unitPrice, state, totalAssetsValue) {
   const buy = action === 'buy';
   const color = buy ? THEME.green : THEME.red;
@@ -550,5 +636,6 @@ module.exports = {
   propertiesCard,
   assetCatalogCard,
   goldMarketCard,
+  cityCard,
   assetTradeCard,
 };
