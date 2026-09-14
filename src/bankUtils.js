@@ -79,7 +79,7 @@ function unpackUser(x = {}) {
   const stockBasisRaw = x.sb && typeof x.sb === 'object' && !Array.isArray(x.sb) ? x.sb : {};
   const stockBasis = Object.fromEntries(Object.entries(stockBasisRaw).filter(([,v]) => Number(v) > 0).map(([k,v]) => [String(k).toUpperCase(), Number(v)]));
   return {
-    balance: Math.max(0, Math.floor(Number(x.b ?? START_BALANCE) || 0)),
+    balance: Math.floor(Number(x.b ?? START_BALANCE) || 0),
     vault: Math.max(0, Math.floor(Number(x.v ?? 0) || 0)),
     shares: Math.max(0, Number(stocks.NVRS || legacyShares) || 0),
     stocks,
