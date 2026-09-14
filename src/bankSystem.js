@@ -535,6 +535,13 @@ async function tradeAsset(message, action, raw) {
         if (owned < count) return replyInfo(message,'لا تملك هذا الممتلك',`لديك ${owned} من ${asset.name}`);
         state.assets[asset.code] = owned - count;
         if (state.assets[asset.code] <= 0) delete state.assets[asset.code];
+        const keep = Math.max(0, Math.floor(Number(state.assets?.[asset.code] || 0)));
+        let seen = 0;
+        state.city = (Array.isArray(state.city) ? state.city : []).filter((code) => {
+          if (code !== asset.code) return true;
+          seen += 1;
+          return seen <= keep;
+        });
         state.balance += total;
       }
     }
@@ -550,7 +557,7 @@ function helpEmbed() {
     .setTitle('🏦 أوامر Neverless Bank')
         .addFields(
       { name: 'الحساب', value: 'رصيد\nتحويل\nايداع\nسحب', inline: true },
-      { name: 'الدخل', value: 'راتب\nبخشيش\nقرض\nوقت', inline: true },
+      { name: 'الدخل', value: 'راتب\nبخشيش\nقرض\nتسديد قرض\nوقت', inline: true },
       { name: 'الألعاب', value: 'رهان\nاستثمار\nنرد\nقمار\nتداول', inline: true },
       { name: 'ألعاب إضافية', value: 'روليت\nهايلو\nصناديق\nالغام\nفواكه\nالوان\nعملة\nرقم', inline: true },
       { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات\nمدينتي', inline: true },
@@ -1342,7 +1349,7 @@ async function mines(message, raw) {
         const fresh=getUser(message.guildId,message.author.id);
         if(fresh.balance<wager){result={error:'رصيدك أصبح أقل من مبلغ الجولة.'};return;}
         const payout=Math.floor(wager*2.2),net=payout-wager;
-        fresh.balance=fresh.balance-wager+payout;fresh.games+=1;fresh.wins+=1;fresh.earned+=net;
+        debitBalance(fresh,wager);fresh.balance+=payout;fresh.games+=1;fresh.wins+=1;fresh.earned+=net;
         result=await persistUser(message.guild,message.author.id)?{balance:fresh.balance,net}:{error:'تعذر حفظ الجولة.'};
       });
       if(result.error)return sent.edit({content:result.error,components:gridButtons('mine',nonce,9,true,revealed)}).catch(()=>{});
@@ -1493,7 +1500,7 @@ async function numberGuess(message, raw) {
     if(interaction.user.id!==message.author.id)return interaction.reply({content:'هذه الجولة ليست لك.',ephemeral:true}).catch(()=>{});
     collector.stop('done');await interaction.deferUpdate().catch(()=>{});
     const picked=Number(interaction.customId.split(':')[3])+1,result=1+Math.floor(Math.random()*5);let output;
-    await withLock(accountLockKey(message.guildId,message.author.id),async()=>{const fresh=getUser(message.guildId,message.author.id);const left=commandCooldownLeft(fresh,'number');if(left>0){output={error:`الوقت الباقي ${formatDuration(left)}`};return;}if(fresh.balance<wager){output={error:'رصيد غير كافٍ'};return;}const won=picked===result,payout=won?wager*4:0,net=payout-wager;fresh.balance=fresh.balance-wager+payout;fresh.games+=1;if(won){fresh.wins+=1;fresh.earned+=net;}else fresh.lost+=wager;setCommandCooldown(fresh,'number');output=await persistUser(message.guild,message.author.id)?{won,balance:fresh.balance}:{error:'تعذر الحفظ'};});
+    await withLock(accountLockKey(message.guildId,message.author.id),async()=>{const fresh=getUser(message.guildId,message.author.id);const left=commandCooldownLeft(fresh,'number');if(left>0){output={error:`الوقت الباقي ${formatDuration(left)}`};return;}if(fresh.balance<wager){output={error:'رصيد غير كافٍ'};return;}const won=picked===result,payout=won?wager*4:0,net=payout-wager;debitBalance(fresh,wager);fresh.balance+=payout;fresh.games+=1;if(won){fresh.wins+=1;fresh.earned+=net;}else fresh.lost+=wager;setCommandCooldown(fresh,'number');output=await persistUser(message.guild,message.author.id)?{won,balance:fresh.balance}:{error:'تعذر الحفظ'};});
     if(output.error)return sent.edit({content:output.error,components:choiceButtons('number',nonce,labels,true)}).catch(()=>{});
     await sent.edit({content:`<@${message.author.id}> — ${output.won?`ربحت ${money(wager*3)}`:`خسرت ${money(wager)}`}`,files:[{attachment:numberGuessCard(wager,picked,result,output.won,output.balance),name:`number-${nonce}.png`}],attachments:[],components:choiceButtons('number',nonce,labels,true),allowedMentions:{parse:[]}}).catch(()=>{});
   });
