@@ -63,6 +63,7 @@ const {
   coinCard,
   numberGuessCard,
 } = require('./bankVisualGames');
+const { catalogCard, businessCard, inventoryCard, storeCard, incomeCard } = require('./businessVisuals');
 
 const BANK_CHANNEL_ID = '1548665575247581184';
 const BANK_TEST_CHANNEL_ID = '1548665662556217384';
@@ -94,6 +95,33 @@ const ASSET_CATALOG = Object.freeze({
   GOLD: { code:'GOLD', category:'GOLD', name:'ذهب', aliases:['ذهب','gold'], seed:2500, fractional:true },
 });
 
+
+
+const PRODUCT_CATALOG = Object.freeze({
+ EGG:{code:'EGG',name:'بيض'}, WHEAT:{code:'WHEAT',name:'قمح'}, FLOUR:{code:'FLOUR',name:'دقيق'}, BREAD:{code:'BREAD',name:'خبز'},
+ MILK:{code:'MILK',name:'حليب'}, FEED:{code:'FEED',name:'علف'}, IRON:{code:'IRON',name:'حديد'}, PARTS:{code:'PARTS',name:'قطع صناعية'},
+ FUEL:{code:'FUEL',name:'وقود'}, JEWEL:{code:'JEWEL',name:'مجوهرات'}, MEAL:{code:'MEAL',name:'وجبة'}, BATTERY:{code:'BATTERY',name:'بطارية'}
+});
+const PROJECT_CATALOG = Object.freeze({
+ POULTRY:{code:'POULTRY',name:'مزرعة دواجن',aliases:['دواجن','بيض','مزرعة دواجن'],cost:50000,output:'EGG',outputName:'بيض',outputQty:20,duration:30*60*1000,inputs:{FEED:4},inputsText:'4 علف → 20 بيض'},
+ WHEATFARM:{code:'WHEATFARM',name:'مزرعة قمح',aliases:['قمح','مزرعة قمح'],cost:60000,output:'WHEAT',outputName:'قمح',outputQty:25,duration:30*60*1000,inputs:{},inputsText:'إنتاج أساسي'},
+ MILL:{code:'MILL',name:'مطحنة',aliases:['مطحنة','دقيق'],cost:110000,output:'FLOUR',outputName:'دقيق',outputQty:15,duration:35*60*1000,inputs:{WHEAT:20},inputsText:'20 قمح → 15 دقيق'},
+ BAKERY:{code:'BAKERY',name:'مخبز',aliases:['مخبز','خبز'],cost:180000,output:'BREAD',outputName:'خبز',outputQty:12,duration:40*60*1000,inputs:{FLOUR:10,EGG:4},inputsText:'10 دقيق + 4 بيض → 12 خبز'},
+ MINE:{code:'MINE',name:'منجم',aliases:['منجم','حديد'],cost:300000,output:'IRON',outputName:'حديد',outputQty:18,duration:45*60*1000,inputs:{},inputsText:'إنتاج أساسي'},
+ PARTSFACTORY:{code:'PARTSFACTORY',name:'مصنع قطع',aliases:['مصنع قطع','قطع'],cost:650000,output:'PARTS',outputName:'قطع صناعية',outputQty:8,duration:55*60*1000,inputs:{IRON:15},inputsText:'15 حديد → 8 قطع'},
+ REFINERY:{code:'REFINERY',name:'مصفاة',aliases:['مصفاة','وقود'],cost:900000,output:'FUEL',outputName:'وقود',outputQty:10,duration:60*60*1000,inputs:{},inputsText:'إنتاج أساسي'},
+ JEWELRY:{code:'JEWELRY',name:'ورشة مجوهرات',aliases:['مجوهرات','ورشة مجوهرات'],cost:1200000,output:'JEWEL',outputName:'مجوهرات',outputQty:3,duration:75*60*1000,inputs:{IRON:5},inputsText:'مواد صناعية → 3 مجوهرات'}
+});
+function projectFrom(raw){const q=String(raw||'').trim().toLowerCase();return Object.values(PROJECT_CATALOG).find(p=>p.code.toLowerCase()===q||p.name===q||p.aliases.includes(q))||null;}
+function productFrom(raw){const q=String(raw||'').trim().toLowerCase();return Object.values(PRODUCT_CATALOG).find(p=>p.code.toLowerCase()===q||p.name===q)||null;}
+function normalizeBusinessState(state){
+ if(!state.inventory||typeof state.inventory!=='object')state.inventory={};
+ if(!Array.isArray(state.businesses))state.businesses=[];
+ if(!state.store||typeof state.store!=='object')state.store={name:'',slots:3,listings:[],revenue:0,expenses:0,sales:0};
+ if(!Array.isArray(state.store.listings))state.store.listings=[];
+ state.store.slots=Math.max(3,Math.floor(Number(state.store.slots)||3));
+ return state;
+}
 
 const users = new Map();
 const userMessageIds = new Map();
@@ -560,6 +588,7 @@ function helpEmbed() {
       { name: 'ألعاب إضافية', value: 'روليت\nهايلو\nصناديق\nالغام\nفواكه\nالوان\nعملة\nرقم', inline: true },
       { name: 'السوق', value: 'سهم\nعقار / سيارة / طائرة\nذهب\nشراء اسم الممتلك\nبيع اسم الممتلك\nممتلكات', inline: true },
       { name: 'الأمان والترتيب', value: 'سرقة\nحماية\nالغاء حماية\nتوب', inline: true },
+      { name: 'الأعمال والمتاجر', value: 'مشاريع\nإنشاء مشروع\nمشروعي\nإنتاج\nتطوير مشروع\nمخزني\nإنشاء متجر\nمتجر @member\nعرض\nشراء من متجر\nتوسعة متجر\nدخل المتجر', inline: true },
     )
     .setFooter({ text: 'Neverless Bank' });
 }
@@ -1688,6 +1717,59 @@ async function adminMoney(message, action, raw) {
   });
 }
 
+async function sendBusinessImage(message,buffer,name,content,components=[]){return replyImage(message,buffer,name,content,components);}
+async function projectCatalog(message){return sendBusinessImage(message,catalogCard(PROJECT_CATALOG),'projects.png','<@'+message.author.id+'> — المشاريع المتاحة');}
+async function createProject(message,raw){
+ const parts=String(raw||'').trim().split(/\s+/u); let project=null,used=0;
+ for(let n=Math.min(3,parts.length);n>=1;n--){project=projectFrom(parts.slice(0,n).join(' '));if(project){used=n;break;}}
+ if(!project)return projectCatalog(message);
+ const customName=parts.slice(used).join(' ').trim()||project.name;
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));
+ if(state.businesses.length>=6)return replyInfo(message,'حد المشاريع','لديك الحد الحالي 6 مشاريع');
+ if(state.balance<project.cost)return replyInfo(message,'رصيد غير كافٍ','تكلفة الإنشاء '+money(project.cost));
+ debitBalance(state,project.cost); state.businesses.push({id:crypto.randomBytes(4).toString('hex'),type:project.code,name:customName,level:1,lines:1,storageSlots:12,quality:1,speed:1,batch:1,lastProduced:Date.now(),revenue:0,expenses:project.cost});
+ await persistUser(message.guild,message.author.id);return sendBusinessImage(message,businessCard(state.businesses.at(-1),project,state.inventory),'project.png','<@'+message.author.id+'> — تم إنشاء '+customName);});
+}
+function businessByName(state,raw){const q=String(raw||'').trim().toLowerCase();return state.businesses.find(b=>b.name.toLowerCase()===q||b.id===q)||null;}
+async function myProjects(message){const state=normalizeBusinessState(getUser(message.guildId,message.author.id));if(!state.businesses.length)return projectCatalog(message);const b=state.businesses[0],p=PROJECT_CATALOG[b.type];return sendBusinessImage(message,businessCard(b,p,state.inventory),'my-project.png','<@'+message.author.id+'> — لديك '+state.businesses.length+' مشاريع');}
+async function produce(message,raw){
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));const b=businessByName(state,raw)||state.businesses[0];if(!b)return projectCatalog(message);const p=PROJECT_CATALOG[b.type],now=Date.now(),duration=Math.max(60000,p.duration/Math.max(1,b.speed));
+ const cycles=Math.min(Math.max(1,b.lines),Math.floor((now-b.lastProduced)/duration));if(cycles<1)return replyInfo(message,'الإنتاج قيد العمل','الوقت المتبقي '+formatDuration(duration-(now-b.lastProduced)));
+ const batches=cycles*Math.max(1,b.batch);for(const [code,q] of Object.entries(p.inputs)){const need=q*batches;if(Number(state.inventory[code]||0)<need)return replyInfo(message,'مواد ناقصة','تحتاج '+need+' '+PRODUCT_CATALOG[code].name);}
+ const distinct=new Set(Object.keys(state.inventory).filter(k=>state.inventory[k]>0));if(!distinct.has(p.output)&&distinct.size>=b.storageSlots)return replyInfo(message,'المخزن ممتلئ','طوّر خانات المخزن أولاً');
+ for(const [code,q] of Object.entries(p.inputs))state.inventory[code]-=q*batches;state.inventory[p.output]=Number(state.inventory[p.output]||0)+p.outputQty*batches;b.lastProduced=now;b.expenses+=Math.round(p.cost*.002*batches);
+ await persistUser(message.guild,message.author.id);return sendBusinessImage(message,businessCard(b,p,state.inventory),'production.png','<@'+message.author.id+'> — تم استلام '+(p.outputQty*batches)+' '+p.outputName);});
+}
+async function upgradeProject(message,raw){
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));const words=String(raw||'').trim().split(/\s+/u),kind=words.shift()||'',b=businessByName(state,words.join(' '))||state.businesses[0];if(!b)return projectCatalog(message);
+ const p=PROJECT_CATALOG[b.type],cost=Math.round(p.cost*(.35+b.level*.2));if(state.balance<cost)return replyInfo(message,'رصيد غير كافٍ','تكلفة التطوير '+money(cost));debitBalance(state,cost);b.expenses+=cost;b.level++;
+ if(/سرعة/u.test(kind))b.speed=Number((b.speed+.25).toFixed(2));else if(/كمية|دفعة/u.test(kind))b.batch++;else if(/خانات|مخزن/u.test(kind))b.storageSlots+=4;else if(/جودة/u.test(kind))b.quality=Math.min(5,b.quality+1);else b.lines++;
+ await persistUser(message.guild,message.author.id);return sendBusinessImage(message,businessCard(b,p,state.inventory),'upgrade.png','<@'+message.author.id+'> — تم التطوير مقابل '+money(cost));});
+}
+async function inventory(message){const state=normalizeBusinessState(getUser(message.guildId,message.author.id));return sendBusinessImage(message,inventoryCard(state.inventory,PRODUCT_CATALOG),'inventory.png','<@'+message.author.id+'> — مخزني');}
+async function createStore(message,name){
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));if(state.store.name)return replyInfo(message,'لديك متجر','متجرك الحالي: '+state.store.name);const cost=100000;if(state.balance<cost)return replyInfo(message,'رصيد غير كافٍ','إنشاء المتجر يكلف '+money(cost));debitBalance(state,cost);state.store={name:String(name||'').trim().slice(0,32)||('Store '+message.author.username),slots:3,listings:[],revenue:0,expenses:cost,sales:0};await persistUser(message.guild,message.author.id);return viewStore(message,message.author.id);});
+}
+async function viewStore(message,userId){
+ const state=normalizeBusinessState(getUser(message.guildId,userId));if(!state.store.name)return replyInfo(message,'لا يوجد متجر','هذا العضو لم ينشئ متجراً');let owner=message.guild.members.cache.get(userId)?.user; if(!owner) owner=await message.client.users.fetch(userId).catch(()=>null);
+ return sendBusinessImage(message,storeCard(owner?.globalName||owner?.username||'Member',state.store,state.store.listings,PRODUCT_CATALOG),'store.png','<@'+message.author.id+'> — '+state.store.name);
+}
+async function listProduct(message,raw){
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));if(!state.store.name)return replyInfo(message,'أنشئ متجراً أولاً','إنشاء متجر اسم المتجر');const m=String(raw||'').trim().match(/^(.+?)\s+(\d+)\s+(\d+)$/u);if(!m)return replyUsage(message,'عرض منتج',['عرض بيض 5 100']);
+ const item=productFrom(m[1]),qty=Math.floor(Number(m[2])),price=Math.floor(Number(m[3]));if(!item||qty<1||price<1)return replyInfo(message,'بيانات غير صالحة','حدد المنتج والكمية وسعر الوحدة');if(Number(state.inventory[item.code]||0)<qty)return replyInfo(message,'كمية غير كافية','المنتج غير متوفر بهذه الكمية');
+ const old=state.store.listings.find(l=>l.code===item.code);if(!old&&state.store.listings.length>=state.store.slots)return replyInfo(message,'خانات المتجر ممتلئة','اشترِ خانة متجر إضافية');state.inventory[item.code]-=qty;if(old){old.qty+=qty;old.price=price;}else state.store.listings.push({code:item.code,qty,price});await persistUser(message.guild,message.author.id);return viewStore(message,message.author.id);});
+}
+async function buyListing(message,sellerUser,raw){
+ const m=String(raw||'').trim().match(/^(.+?)\s+(\d+)$/u);if(!sellerUser||!m)return replyUsage(message,'شراء من متجر',['شراء من متجر @member بيض 2']);const item=productFrom(m[1]),qty=Math.floor(Number(m[2]));if(!item||qty<1)return replyInfo(message,'طلب غير صالح','حدد المنتج والكمية');
+ return withLocks([accountLockKey(message.guildId,message.author.id),accountLockKey(message.guildId,sellerUser.id)],async()=>{const buyer=normalizeBusinessState(getUser(message.guildId,message.author.id)),seller=normalizeBusinessState(getUser(message.guildId,sellerUser.id));const l=seller.store.listings.find(x=>x.code===item.code);if(!l||l.qty<qty)return replyInfo(message,'غير متوفر','الكمية المطلوبة غير موجودة');const total=l.price*qty;if(buyer.balance<total)return replyInfo(message,'رصيد غير كافٍ','قيمة الطلب '+money(total));
+ debitBalance(buyer,total);seller.balance+=total;buyer.inventory[item.code]=Number(buyer.inventory[item.code]||0)+qty;l.qty-=qty;if(l.qty<=0)seller.store.listings=seller.store.listings.filter(x=>x!==l);seller.store.revenue+=total;seller.store.sales++;seller.earned+=total;
+ await Promise.all([persistUser(message.guild,message.author.id),persistUser(message.guild,sellerUser.id)]);return replyInfo(message,'تم الشراء',qty+' '+item.name+' مقابل '+money(total));});
+}
+async function expandStore(message){
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id));if(!state.store.name)return replyInfo(message,'لا يوجد متجر','أنشئ متجراً أولاً');const cost=50000*Math.pow(2,state.store.slots-3);if(state.balance<cost)return replyInfo(message,'رصيد غير كافٍ','الخانة الجديدة '+money(cost));debitBalance(state,cost);state.store.slots++;state.store.expenses+=cost;await persistUser(message.guild,message.author.id);return replyInfo(message,'تمت التوسعة','خانات متجرك الآن '+state.store.slots+' • التكلفة '+money(cost));});
+}
+async function businessIncome(message){const state=normalizeBusinessState(getUser(message.guildId,message.author.id));return sendBusinessImage(message,incomeCard(state.store,state.businesses),'business-income.png','<@'+message.author.id+'> — تقرير أعمالك');}
+
 function normalized(content) {
   return digits(content)
     .trim()
@@ -1703,7 +1785,7 @@ async function handleBankMessage(message, client) {
   const text = normalized(message.content);
   if (!text) return false;
 
-  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|تسديد قرض|سداد قرض|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
+  const known = /^(?:حماية|الغاء حماية|إلغاء حماية|سرقة|زيده|تصفير كامل السيرفر|تصفير كامل|تصفير|اوامر|أوامر|bank|bank help|رصيد|balance|bal|بروفايل|profile|محفظة|wallet|ثروتي|وقت|cooldowns?|راتب|salary|daily|بخشيش|tip|قرض|loan|تسديد قرض|سداد قرض|مشاريع|مشروعي|إنشاء مشروع|انشاء مشروع|إنتاج|انتاج|تطوير مشروع|مخزني|إنشاء متجر|انشاء متجر|متجر|عرض|شراء من متجر|توسعة متجر|دخل المتجر|توب|top|سهم|اسهم|أسهم|stock|تحويل|transfer|ايداع|إيداع|deposit|سحب|withdraw|رهان|bet|استثمار|invest|نرد|dice|قمار|gamble|تداول|تدوال|trade|روليت|roulette|هايلو|هاي لو|hilo|صناديق|boxes|شراء سهم|شراء اسهم|شراء أسهم|buy|بيع سهم|بيع اسهم|بيع أسهم|sell|ممتلكات|عقار|عقارات|سيارة|سياره|سيارات|طائرة|طائره|طيارة|طياره|طائرات|ذهب|gold|شراء|بيع|الغام|ألغام|mines|فواكه|fruits|الوان|ألوان|colors|عملة|coin|رقم|number)(?:\s|$)/u.test(text);
   if (!known) return false;
 
   try {
@@ -1746,10 +1828,19 @@ async function handleBankMessage(message, client) {
       await repayLoan(message, loanRepay[1] || 'كامل');
       return true;
     }
-    if (/^(?:مدينتي|city)$/u.test(text)) {
-      await city(message);
-      return true;
-    }
+if (/^(?:مشاريع)$/u.test(text)) { await projectCatalog(message); return true; }
+    let bm=text.match(/^(?:إنشاء مشروع|انشاء مشروع)\s+(.+)$/u); if(bm){await createProject(message,bm[1]);return true;}
+    if (/^(?:مشروعي)$/u.test(text)) { await myProjects(message); return true; }
+    bm=text.match(/^(?:إنتاج|انتاج)(?:\s+(.+))?$/u); if(bm){await produce(message,bm[1]||'');return true;}
+    bm=text.match(/^تطوير مشروع\s+(سرعة|كمية|دفعة|خانات|مخزن|جودة|خطوط)(?:\s+(.+))?$/u);if(bm){await upgradeProject(message,bm[1]+' '+(bm[2]||''));return true;}
+    if (/^مخزني$/u.test(text)){await inventory(message);return true;}
+    bm=text.match(/^(?:إنشاء متجر|انشاء متجر)\s+(.+)$/u);if(bm){await createStore(message,bm[1]);return true;}
+    if(/^متجر$/u.test(text)){await viewStore(message,message.author.id);return true;}
+    if(/^متجر\s+<@!?\d{15,22}>$/u.test(text)){await viewStore(message,message.mentions.users.first().id);return true;}
+    bm=text.match(/^عرض\s+(.+)$/u);if(bm){await listProduct(message,bm[1]);return true;}
+    bm=text.match(/^شراء من متجر\s+<@!?\d{15,22}>\s+(.+)$/u);if(bm){await buyListing(message,message.mentions.users.first(),bm[1]);return true;}
+    if(/^توسعة متجر$/u.test(text)){await expandStore(message);return true;}
+    if(/^دخل المتجر$/u.test(text)){await businessIncome(message);return true;}
     if (/^(?:حماية)$/u.test(text)) { await protect(message, false); return true; }
     if (/^(?:الغاء حماية|إلغاء حماية)$/u.test(text)) { await protect(message, true); return true; }
     if (/^(?:سرقة)\s+<@!?\d{15,22}>$/u.test(text)) { await rob(message); return true; }

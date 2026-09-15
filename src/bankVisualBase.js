@@ -223,7 +223,14 @@ function drawAvatarImage(ctx, image, x, y, size, ring = THEME.blue) {
 }
 
 function playerName(user) {
-  return user?.globalName || user?.username || 'Member';
+  const globalName = String(user?.globalName || '').trim();
+  const username = String(user?.username || '').trim();
+  // Some Discord display names are symbol/emoji-only and cannot be rendered by the bank font.
+  // Prefer the stable username so the card never shows an empty/square name.
+  const hasLettersOrNumbers = (value) => /[\p{L}\p{N}]/u.test(value);
+  if (globalName && hasLettersOrNumbers(globalName)) return globalName;
+  if (username) return username;
+  return 'Member';
 }
 
 function drawStatusPill(ctx, x, y, text, good) {
