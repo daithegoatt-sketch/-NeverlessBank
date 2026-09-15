@@ -233,53 +233,63 @@ function outstandingLoan(state) {
 }
 
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function persistRecord(channel, id, content, label) {
+  // Discord can occasionally fail an edit/send transiently. Retry before telling
+  // the member that the bank operation failed.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (id) {
+        const edited = await channel.messages.edit(id, { content, allowedMentions: { parse: [] } });
+        if (edited) return { ok: true, id: edited.id };
+      } else {
+        const sent = await channel.send({ content, allowedMentions: { parse: [] } });
+        if (sent) return { ok: true, id: sent.id };
+      }
+    } catch (error) {
+      // Unknown Message means the cached persistence id is stale: immediately
+      // fall back to creating a fresh record instead of repeatedly editing it.
+      if (id && Number(error?.code) === 10008) {
+        id = null;
+        continue;
+      }
+      console.warn(`[bank] persistence retry ${attempt}/3 (${label}):`, error?.code || error?.message || error);
+    }
+    if (attempt < 3) await sleep(200 * attempt);
+  }
+  return { ok: false, id: null };
+}
+
 async function persistUser(guild, userId) {
   const channel = dataChannel(guild);
-  if (!channel) return false;
-
+  if (!channel) {
+    console.error(`[bank] data channel missing while persisting user ${userId}`);
+    return false;
+  }
   const accountKey = key(guild.id, userId);
   const content = `${USER_PREFIX}${guild.id}|${userId}|${enc(packUser(getUser(guild.id, userId)))}`;
-  const id = userMessageIds.get(accountKey);
-
-  if (id) {
-    const edited = await channel.messages.edit(id, {
-      content,
-      allowedMentions: { parse: [] },
-    }).catch(() => null);
-    if (edited) return true;
-  }
-
-  const message = await channel.send({ content, allowedMentions: { parse: [] } }).catch((error) => {
-    console.error(`[bank] failed to persist user ${userId}:`, error);
-    return null;
-  });
-  if (!message) return false;
-  userMessageIds.set(accountKey, message.id);
+  let id = userMessageIds.get(accountKey) || null;
+  let result = await persistRecord(channel, id, content, `user:${userId}`);
+  if (!result.ok && id) result = await persistRecord(channel, null, content, `user-new:${userId}`);
+  if (!result.ok) return false;
+  userMessageIds.set(accountKey, result.id);
   return true;
 }
 
 async function persistMarket(guild) {
   const channel = dataChannel(guild);
-  if (!channel) return false;
-
+  if (!channel) {
+    console.error('[bank] data channel missing while persisting market');
+    return false;
+  }
   const market = markets.get(guild.id) || newMarket();
   const content = `${MARKET_PREFIX}${guild.id}|${enc(packMarket(market))}`;
-  const id = marketMessageIds.get(guild.id);
-
-  if (id) {
-    const edited = await channel.messages.edit(id, {
-      content,
-      allowedMentions: { parse: [] },
-    }).catch(() => null);
-    if (edited) return true;
-  }
-
-  const message = await channel.send({ content, allowedMentions: { parse: [] } }).catch((error) => {
-    console.error('[bank] failed to persist market:', error);
-    return null;
-  });
-  if (!message) return false;
-  marketMessageIds.set(guild.id, message.id);
+  let id = marketMessageIds.get(guild.id) || null;
+  let result = await persistRecord(channel, id, content, 'market');
+  if (!result.ok && id) result = await persistRecord(channel, null, content, 'market-new');
+  if (!result.ok) return false;
+  marketMessageIds.set(guild.id, result.id);
   return true;
 }
 
