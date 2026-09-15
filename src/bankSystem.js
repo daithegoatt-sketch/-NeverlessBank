@@ -1742,7 +1742,7 @@ function projectButtons(nonce,index,total,b,p,disabled=false){
  return [nav,upgrades];
 }
 function productionStatus(b,p){
- const capMs=15*60*1000, elapsed=Math.max(0,Date.now()-Number(b.lastProduced||Date.now()));
+ const capMs=Math.max(60000,(15*60*1000)/Math.max(1,Number(b.speed)||1)), elapsed=Math.max(0,Date.now()-Number(b.lastProduced||Date.now()));
  const ratio=Math.min(1,elapsed/capMs), cap=p.outputQty*Math.max(1,b.lines)*Math.max(1,b.batch);
  return {ready:Math.floor(cap*ratio),cap,next:Math.max(0,capMs-elapsed),rate:cap/15};
 }
