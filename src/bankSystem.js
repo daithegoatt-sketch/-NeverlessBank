@@ -1767,17 +1767,31 @@ async function harvestBusiness(message,b){
  return withLock(accountLockKey(message.guildId,message.author.id),async()=>{
   const state=normalizeBusinessState(getUser(message.guildId,message.author.id)),fresh=state.businesses.find(x=>x.id===b.id);if(!fresh)return {error:'المشروع غير موجود'};
   const p=PROJECT_CATALOG[fresh.type],ps=productionStatus(fresh,p);if(ps.ready<1)return {error:'لا يوجد إنتاج جاهز بعد • '+formatDuration(ps.next)};
-  const multiplier=ps.ready/Math.max(1,p.outputQty);
-  for(const [code,q] of Object.entries(p.inputs)){const need=Math.max(1,Math.ceil(q*multiplier));if(Number(state.inventory[code]||0)<need)return {error:'مواد ناقصة • تحتاج '+need+' '+PRODUCT_CATALOG[code].name};}
-  for(const [code,q] of Object.entries(p.inputs))state.inventory[code]=Math.max(0,Number(state.inventory[code]||0)-Math.max(1,Math.ceil(q*multiplier)));
+  // Harvesting is always free: production never consumes materials.
   state.inventory[p.output]=Number(state.inventory[p.output]||0)+ps.ready;fresh.lastProduced=Date.now();fresh.expenses+=Math.max(1,Math.round(p.cost*.0005*ps.ready));
   await persistUser(message.guild,message.author.id);return {qty:ps.ready,b:fresh,p};
  });
 }
+function upgradeRequirements(b,p,kind){
+ const lv=Math.max(1,Number(b.level)||1), scale=1+Math.floor((lv-1)/2);
+ const tables={
+  speed:[['PARTS',2*scale],['FUEL',3*scale]],
+  batch:[['IRON',3*scale],['PARTS',2*scale]],
+  storage:[['IRON',4*scale],['WHEAT',3*scale]],
+  line:[['PARTS',4*scale],['IRON',5*scale]],
+ };
+ // Every upgrade needs materials; project-specific inputs are added when available.
+ const req=new Map(tables[kind]||tables.line);
+ for(const [code,q] of Object.entries(p.inputs||{})) req.set(code,(req.get(code)||0)+Math.max(1,Math.ceil(q*scale)));
+ return [...req].map(([code,qty])=>({code,qty,name:PRODUCT_CATALOG[code]?.name||code}));
+}
 async function upgradeBusinessButton(message,b,kind){
- return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id)),fresh=state.businesses.find(x=>x.id===b.id);if(!fresh)return {error:'المشروع غير موجود'};const p=PROJECT_CATALOG[fresh.type],cost=projectUpgradeCost(fresh,p);if(state.balance<cost)return {error:'تحتاج '+money(cost)+' للتطوير'};
+ return withLock(accountLockKey(message.guildId,message.author.id),async()=>{const state=normalizeBusinessState(getUser(message.guildId,message.author.id)),fresh=state.businesses.find(x=>x.id===b.id);if(!fresh)return {error:'المشروع غير موجود'};const p=PROJECT_CATALOG[fresh.type],cost=projectUpgradeCost(fresh,p),requirements=upgradeRequirements(fresh,p,kind);
+ const missing=requirements.filter(r=>Number(state.inventory[r.code]||0)<r.qty);if(missing.length)return {error:'متطلبات التطوير ناقصة • '+missing.map(r=>r.qty+' '+r.name).join(' • '),requirements};
+ if(state.balance<cost)return {error:'تحتاج '+money(cost)+' للتطوير • المواد متوفرة',requirements};
+ for(const r of requirements)state.inventory[r.code]=Math.max(0,Number(state.inventory[r.code]||0)-r.qty);
  debitBalance(state,cost);fresh.expenses+=cost;fresh.level++;if(kind==='speed')fresh.speed=Number((fresh.speed+.25).toFixed(2));else if(kind==='batch')fresh.batch++;else if(kind==='storage')fresh.storageSlots+=4;else fresh.lines++;
- await persistUser(message.guild,message.author.id);return {b:fresh,p,cost};});
+ await persistUser(message.guild,message.author.id);return {b:fresh,p,cost,requirements};});
 }
 async function myProjects(message,startIndex=0,note=''){
  const state=normalizeBusinessState(getUser(message.guildId,message.author.id));if(!state.businesses.length)return projectCatalog(message);
