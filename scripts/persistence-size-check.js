@@ -1,0 +1,3 @@
+'use strict';
+const {packMarket,enc,newMarket}=require('../src/bankUtils');
+const m=newMarket();m.companies={};m.assets={};for(const c of ['NVRS','ASTRA','ARCANE','SALV','VIRO'])m.companies[c]={price:5000000,history:Array(24).fill(5000000)};for(const c of ['HOUSE','APARTMENT','VILLA','PALACE','SEDAN','SUV','SPORT','LUXURY','HELI','JET','BIZJET','GOLD'])m.assets[c]={price:50000000,history:Array(24).fill(50000000)};const payload=`NLBANK1|M|${'1'.repeat(19)}|${enc(packMarket(m))}`;console.log('market persistence chars:',payload.length);if(payload.length>1900){console.error('FAIL: market record too large for Discord');process.exit(1);}console.log('PASS');
