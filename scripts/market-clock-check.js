@@ -1,0 +1,13 @@
+'use strict';
+const {newMarket,packMarket,unpackMarket,MARKET_STEP}=require('../src/bankUtils');
+const old=Date.now()-24*MARKET_STEP;
+const m=unpackMarket({p:1000,u:old,au:old,gu:old,sv:3,c:{NVRS:1000},a:{GOLD:2500}});
+const overdue=Math.floor(Math.max(0,Date.now()-m.updatedAt)/MARKET_STEP);
+if(overdue>1)throw new Error(`market replayed ${overdue} missed stock ticks`);
+m.updatedAt+=MARKET_STEP;
+const remaining=Math.max(0,m.updatedAt+MARKET_STEP-Date.now());
+if(remaining<MARKET_STEP-2000)throw new Error(`timer was not restored: ${remaining}`);
+const fresh=newMarket();if(fresh.updatedAt+MARKET_STEP-Date.now()<MARKET_STEP-2000)throw new Error('fresh timer invalid');
+const chars=`NLBANK1|M|${'1'.repeat(19)}|${Buffer.from(JSON.stringify(packMarket(m))).toString('base64url')}`.length;
+if(chars>1900)throw new Error(`persistence too large: ${chars}`);
+console.log('PASS market clock/timer', {overdue,remaining,chars});

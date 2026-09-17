@@ -1,0 +1,1 @@
+Stock market cadence remains the original 3 minutes. Missed/offline intervals are collapsed to at most one price tick so the next command cannot compound dozens of stale updates. The visible countdown restarts from 3:00 after that tick.
